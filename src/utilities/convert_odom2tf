@@ -1,0 +1,1 @@
+rosrun ndt_offline tf_writer --bag-file-path /media/kevin/ba404f82-4063-4ba5-8c0b-2c695fa22122/michigan/gt/2012_01_15/0.bag --data-set michigan --odom-topic /robot_gt

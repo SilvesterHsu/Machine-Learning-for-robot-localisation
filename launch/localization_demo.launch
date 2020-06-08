@@ -1,0 +1,9 @@
+<launch>
+
+
+<node name="lidar_odom_queue"  pkg="self_localization" type="lidar_odom_queue.py" />
+
+<node name="localizationServer" pkg="self_localization" type="nn_localization_sever.py"  output="screen"/>
+
+  
+</launch>

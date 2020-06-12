@@ -77,19 +77,21 @@ class Regressor(nn.Module):
     def forward(self, x):
         x = self.flatten(x)
         # Part 1: trans
-        t = self.fc1_trans(x)
-        t = self.fc2_trans(t)
-        t = self.fc3_trans(t)
-        t = self.logits_t(t)
+        net_t = self.fc1_trans(x)
+        net_t = self.fc2_trans(net_t)
+        feature_t = self.fc3_trans(net_t)        
         # Part 2: rot
-        r = self.fc1_rot(x)
-        r = self.fc2_rot(r)
-        r = self.fc3_rot(r)
-        r = self.logits_r(r)
-        r = nn.functional.normalize(r, p=2, dim=1)
+        net_r = self.fc1_rot(x)
+        net_r = self.fc2_rot(net_r)
+        feature_r = self.fc3_rot(net_r)
+        
+        logits_t = self.logits_t(feature_t)
+        logits_r = self.logits_r(feature_r)
+        
+        logits_r = nn.functional.normalize(logits_r, p=2, dim=1)
 
-        x = torch.cat([t,r],dim=1)
-        return x
+        logits = torch.cat([logits_t, logits_r],dim=1)
+        return logits, feature_t, feature_r
     
 class vggnet(nn.Module):
     def __init__(self, opt="context", input_channel = 2048):
@@ -103,6 +105,7 @@ class vggnet(nn.Module):
     def forward(self,x):
         if self.opt == "context":
             x = self.context(x)
+            return x
         elif self.opt == "regressor":
-            x = self.regressor(x)
-        return x
+            logits,feat_t,feat_r = self.regressor(x)
+            return logits,feat_t,feat_r

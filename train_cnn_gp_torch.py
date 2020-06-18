@@ -24,7 +24,7 @@ if torch.cuda.is_available():
 
 
 torch.set_default_dtype(torch.float32)
-torch.set_printoptions(precision=8)
+torch.set_printoptions(precision=3)
 torch.backends.cudnn.benchmark = True
 
 
@@ -45,9 +45,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--batch_size', type=int, default=300, help='minibatch size')
 parser.add_argument('--num_epochs', type=int, default=200, help='number of epochs')
 parser.add_argument('--grad_clip', type=float, default=5., help='clip gradients at this value')
-parser.add_argument('--learning_rate', type=float, default=0.1, help='learning rate')
+parser.add_argument('--learning_rate', type=float, default=0.002, help='learning rate')
 parser.add_argument('--learning_rate_clip', type=float, default=0.0000001, help='learning rate clip')
-parser.add_argument('--decay_rate', type=float, default=.95, help='decay rate for rmsprop')
+parser.add_argument('--decay_rate', type=float, default=.9, help='decay rate for rmsprop')
 parser.add_argument('--weight_decay', type=float, default=.0001, help='decay rate for rmsprop')
 parser.add_argument('--batch_norm_decay', type=float, default=.999, help='decay rate for rmsprop')
 parser.add_argument('--keep_prob', type=float, default=1.0, help='dropout keep probability')
@@ -74,7 +74,7 @@ parser.add_argument('--train_dataset', type=str, default = ['/notebooks/michigan
 parser.add_argument('--train_dataset', type=str, default = ['/notebooks/michigan_nn_data/test'])
 '''
 parser.add_argument('--seed', default=1337, type=int)
-parser.add_argument('--save_every', type=int, default=2000, help='save frequency')
+parser.add_argument('--save_every', type=int, default=2500, help='save frequency')
 parser.add_argument('--display', type=int, default=10, help='display frequency')
 
 sys.argv = ['']
@@ -174,8 +174,9 @@ class GPModel(gpytorch.Module):
     def __init__(self, inducing_points):
         super(GPModel, self).__init__()
         self.net = Model()
-        self.net.load_state_dict(torch.load(os.path.join('/notebooks/global_localization/dual_resnet_torch','model-23-96000.pth')))
+        #self.net.load_state_dict(torch.load(os.path.join('/notebooks/global_localization/dual_resnet_torch','model-23-96000.pth')))
         self.gp = MultitaskGPModel(inducing_points)
+        self.likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks=3)
 
     def forward(self, x):
         global_output, trans_feat, _ = self.net(x)
@@ -194,6 +195,8 @@ if torch.cuda.is_available():
     torch.cuda.set_device(device)
 
 model = GPModel(torch.zeros(3, args.batch_size, 128)).to(device)
+#model.net.load_state_dict(torch.load(os.path.join('/notebooks/global_localization/dual_resnet_torch','model-23-96000.pth')))
+model.load_state_dict(torch.load(os.path.join(args.model_dir,'model-111-47500.pth')),strict=False)
 
 # Disable resnet
 for param in model.net.resnet.parameters():
@@ -217,43 +220,20 @@ for name, param in model.named_parameters():
 args.norm_mean = args.norm_mean.to(device)
 args.norm_std = args.norm_std.to(device)
 
-likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks=3)
-likelihood = likelihood.to(device)
-
-# GP
-gp_optimizer = torch.optim.Adam([
-    {'params': model.gp.parameters()},
-    {'params': likelihood.parameters()},
-], lr=args.learning_rate, weight_decay=args.weight_decay)
-# Regressor
-regressor_optimizer = torch.optim.Adam([
-    {'params': model.net.global_context.parameters()},
-], lr=args.learning_rate * 0.01, weight_decay=args.weight_decay)
-# CNN
-cnn_optimizer = torch.optim.Adam([
-    {'params': model.net.global_regressor.parameters()},
-], lr=args.learning_rate * 0.001, weight_decay=args.weight_decay)
-'''
 optimizer = optim.Adam([
-    {'params': model.parameters(), \
+    {'params': model.gp.parameters(), \
      'lr': args.learning_rate,'weight_decay':args.weight_decay},
-    {'params': likelihood.parameters(), \
+    {'params': model.likelihood.parameters(), \
      'lr': args.learning_rate,'weight_decay':args.weight_decay},
-    {'params': net.global_context.parameters(), \
+    {'params': model.net.global_context.parameters(), \
+     'lr': args.learning_rate * 0.1,'weight_decay':args.weight_decay},
+    {'params': model.net.global_regressor.parameters(), \
      'lr': args.learning_rate * 0.01,'weight_decay':args.weight_decay},
-    {'params': net.global_regressor.parameters(), \
-     'lr': args.learning_rate * 0.001,'weight_decay':args.weight_decay},
 ])
-'''
 
-#optimizer = optim.Adam(net.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-#optimizer = optimizers.FusedAdam(net.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-gp_scheduler = optim.lr_scheduler.LambdaLR(optimizer=gp_optimizer, lr_lambda=lambda epoch: args.decay_rate**epoch)
-regressor_scheduler = optim.lr_scheduler.LambdaLR(optimizer=regressor_optimizer, lr_lambda=lambda epoch: args.decay_rate**epoch)
-cnn_scheduler = optim.lr_scheduler.LambdaLR(optimizer=cnn_optimizer, lr_lambda=lambda epoch: args.decay_rate**epoch)
-
-mll = gpytorch.mlls.VariationalELBO(likelihood, model.gp, num_data=len(dataset.Targets))
-#net, optimizer = amp.initialize(net, optimizer, opt_level="O1")
+#scheduler = optim.lr_scheduler.LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch: args.decay_rate**epoch)
+scheduler = optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=3, gamma = args.decay_rate)
+mll = gpytorch.mlls.VariationalELBO(model.likelihood, model.gp, num_data=len(dataset.Targets))
 
 
 # In[10]:
@@ -262,65 +242,61 @@ mll = gpytorch.mlls.VariationalELBO(likelihood, model.gp, num_data=len(dataset.T
 print('CNN model parameters:', sum(param.numel() for param in model.net.global_context.parameters()))
 print('Regressor model parameters:', sum(param.numel() for param in model.net.global_regressor.parameters()))
 print('GP model parameters:', sum(param.numel() for param in model.gp.parameters()))
-print('Likelihood parameters:', sum(param.numel() for param in likelihood.parameters()))
+print('Likelihood parameters:', sum(param.numel() for param in model.likelihood.parameters()))
 
 
 # ## Training Epoch
 
-# In[ ]:
+# In[10]:
 
 
-model.train()
-likelihood.train()
-
-for e in range(args.num_epochs):
-    if e != 0:
-        gp_scheduler.step()
-        regressor_scheduler.step()
-        cnn_scheduler.step()
+def train(e):
+    model.train()
+    model.likelihood.train()
     train_loss = 0.
-    for b, data in enumerate(dataloader, 0):
+    with gpytorch.settings.num_likelihood_samples(8):
+        for b, data in enumerate(dataloader, 0):
+            start = time.time()
+            with torch.no_grad():
+                x,y = data.values()
+                x,y = x.to(device),y.to(device)
+                # normalize targets
+                y = normalize(y,args.norm_mean, args.norm_std)
+                trans_target, rot_target = torch.split(y, [3, 4], dim=1)
+                
+            optimizer.zero_grad()
+            output,rot_pred = model(x)
+            trans_loss = -mll(output, trans_target)
+            rot_loss = 1. - torch.mean(torch.square(torch.sum(torch.mul(rot_pred,rot_target),dim=1)))
+            total_loss = trans_loss + args.lamda_weights * rot_loss
+            total_loss.backward()
+            optimizer.step()
+            
+            end = time.time()
+            with torch.no_grad():
+                train_loss += float(total_loss)
+                lr = scheduler.get_last_lr()[0]
+                if ((b+1)%args.display == 0):
+                     print(
+                        "{}/{} (epoch {}), train_loss = {}, time/batch = {:.3f}, learning rate = {:.9f}"
+                        .format(
+                        e * len(dataloader) + (b+1),
+                        args.num_epochs * len(dataloader),
+                        e,
+                        train_loss/(b+1),
+                        end - start,
+                        lr)) # scheduler.get_last_lr()[0]
+                if (e * len(dataloader) + (b+1)) % args.save_every == 0:
+                    checkpoint_path = os.path.join(args.model_dir, 'model-{}-{}.pth'.format(e, e * len(dataloader) + (b+1)))
+                    torch.save(model.state_dict(),checkpoint_path)
+                    print('saving model to model-{}-{}.pth'.format(e, e * len(dataloader) + (b+1)))
 
-        start = time.time()
-        gp_optimizer.zero_grad()
-        cnn_optimizer.zero_grad()
-        regressor_optimizer.zero_grad()
-       
-        x,y = data.values()
-        x,y = x.to(device),y.to(device)
-        # normalize targets
-        y = normalize(y,args.norm_mean, args.norm_std)
-        trans_target, rot_target = torch.split(y, [3, 4], dim=1)
-        
-        output,rot_pred = model(x)
-        trans_loss = -mll(output, trans_target)
-        rot_loss = 1. - torch.mean(torch.square(torch.sum(torch.mul(rot_pred,rot_target),dim=1)))
-        total_loss = trans_loss + args.lamda_weights * rot_loss
-        
-        total_loss.backward()
-        
-        gp_optimizer.step()
-        cnn_optimizer.step()
-        regressor_optimizer.step()
-        
-        end = time.time()
-        
-        with torch.no_grad():
-            train_loss += float(total_loss)
-            if ((b+1)%args.display == 0):
-                 print(
-                    "{}/{} (epoch {}), train_loss = {}, time/batch = {:.3f}, learning rate = {:.9f}"
-                    .format(
-                    e * len(dataloader) + (b+1),
-                    args.num_epochs * len(dataloader),
-                    e,
-                    train_loss/(b+1),
-                    end - start,
-                    gp_scheduler.get_last_lr()[0])) # scheduler.get_last_lr()[0]
-            if (e * len(dataloader) + (b+1)) % args.save_every == 0:
-                checkpoint_path = os.path.join(args.model_dir, 'model-{}-{}.pth'.format(e, e * len(dataloader) + (b+1)))
-                torch.save(model.state_dict(),checkpoint_path)
-                print('saving model to model-{}-{}.pth'.format(e, e * len(dataloader) + (b+1)))
+
+# In[11]:
+
+for epoch in range(args.num_epochs):
+    train(epoch)
+    scheduler.step()
 
 
 # In[ ]:

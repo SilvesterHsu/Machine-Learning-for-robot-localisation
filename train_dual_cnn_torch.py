@@ -45,7 +45,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--batch_size', type=int, default=32, help='minibatch size')
 parser.add_argument('--num_epochs', type=int, default=200, help='number of epochs')
 parser.add_argument('--grad_clip', type=float, default=5., help='clip gradients at this value')
-parser.add_argument('--learning_rate', type=float, default=0.00001, help='learning rate')
+parser.add_argument('--learning_rate', type=float, default=0.0001, help='learning rate')
 parser.add_argument('--learning_rate_clip', type=float, default=0.0000001, help='learning rate clip')
 parser.add_argument('--decay_rate', type=float, default=.95, help='decay rate for rmsprop')
 parser.add_argument('--weight_decay', type=float, default=.0001, help='decay rate for rmsprop')
@@ -71,7 +71,7 @@ parser.add_argument('--train_dataset', type=str, default = ['/notebooks/michigan
 '''
 parser.add_argument('--train_dataset', type=str, default = ['/notebooks/michigan_nn_data/test'])
 '''
-parser.add_argument('--seed', default=1337, type=int)
+parser.add_argument('--seed', default=1338, type=int)
 parser.add_argument('--save_every', type=int, default=2000, help='save frequency')
 parser.add_argument('--display', type=int, default=10, help='display frequency')
 
@@ -312,7 +312,7 @@ if torch.cuda.is_available():
 # set to cpu
 #device = torch.device("cpu")
 net = Model().to(device)
-
+net.load_state_dict(torch.load(os.path.join(args.model_dir,'model-0-2000.pth')),strict=False)
 
 # ## Model Structure
 
@@ -335,7 +335,8 @@ args.norm_std = args.norm_std.to(device)
 
 optimizer = optim.Adam(net.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
 #optimizer = optimizers.FusedAdam(net.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-scheduler = optim.lr_scheduler.LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch: args.decay_rate**epoch)
+#scheduler = optim.lr_scheduler.LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch: args.decay_rate**epoch)
+scheduler = optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=1, gamma = args.decay_rate)
 
 #net, optimizer = amp.initialize(net, optimizer, opt_level="O1")
 
@@ -371,7 +372,7 @@ for e in range(args.num_epochs):
 
         global_loss = translational_rotational_loss(pred=global_output1,                                                     gt=y1_norm,                                                     lamda=args.lamda_weights)
         geometry_consistent_loss = translational_rotational_loss(pred=relative_consistence,                                                                  gt=relative_target_normed,                                                                  lamda=args.lamda_weights)
-        total_loss = global_loss + 0.1 * geometry_consistent_loss
+        total_loss = global_loss + geometry_consistent_loss
         
         # Part 3: Net Backward
         #with amp.scale_loss(total_loss, optimizer) as scaled_loss:

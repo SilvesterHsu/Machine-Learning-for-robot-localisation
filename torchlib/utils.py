@@ -36,8 +36,8 @@ class LocalizationDataset(Dataset):
     Raises:
         TypeError: `sampling_rate` and `frames` should be integer.
     """
-    def __init__(self, dataset_dirs, image_size=[300,300], frames=3, sampling_rate=2, \
-                 transform=None, normalize=False, get_pair = True):
+    def __init__(self, dataset_dirs, image_size=[300,300], frames=10, sampling_rate=2, \
+                 transform=None, normalize=False, get_pair = True, mode = 'train'):
         self.dataset_dirs = dataset_dirs
         self.image_size = image_size
         self.num_connected_frames = frames
@@ -49,10 +49,10 @@ class LocalizationDataset(Dataset):
         self.Images = list()
         self.Targets = list()
         
-        self.__loaddata()
+        self.__loaddata(mode)
         self.norm_mean,self.norm_std = self.get_norm()
         
-    def __loaddata(self):
+    def __loaddata(self,mode='train'):
         for dataset_dir in self.dataset_dirs:
             # Read index from files
             with open(os.path.join(dataset_dir, 'index.txt'), "r") as f:
@@ -70,7 +70,7 @@ class LocalizationDataset(Dataset):
                 target = np.array([px, py, pz, qx, qy, qz, qw], dtype=np.float32)
                 #np.testing.assert_approx_equal(np.sum(target[-4:] ** 2), 1.0, significant=5)
                 
-                img,target = self._image_argumentation(img,target,self.image_size)
+                img,target = self._image_argumentation(img,target,self.image_size,mode=mode)
                 
                 self.Images.append(img)
                 self.Targets.append(target)

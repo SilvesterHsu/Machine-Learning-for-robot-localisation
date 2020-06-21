@@ -157,10 +157,10 @@ class MultitaskGPModel(gpytorch.models.ApproximateGP):
         # so we learn a different set of hyperparameters
         #self.net = Model()
         #self.net.load_state_dict(torch.load(os.path.join(args.model_dir,'model-23-96000.pth')))
-        self.mean_module = gpytorch.means.ConstantMean(batch_shape=torch.Size([3]))
+        self.mean_module = gpytorch.means.ConstantMean(batch_shape=torch.Size([1]))
         self.covar_module = gpytorch.kernels.ScaleKernel(
-            gpytorch.kernels.RBFKernel(batch_shape=torch.Size([3])),
-            batch_shape=torch.Size([3])
+            gpytorch.kernels.RBFKernel(batch_shape=torch.Size([1])),
+            batch_shape=torch.Size([1])
         )
 
     def forward(self, x):
@@ -196,7 +196,7 @@ if torch.cuda.is_available():
 
 model = GPModel(torch.zeros(3, args.batch_size, 128)).to(device)
 #model.net.load_state_dict(torch.load(os.path.join('/notebooks/global_localization/dual_resnet_torch','model-23-96000.pth')))
-model.load_state_dict(torch.load(os.path.join(args.model_dir,'model-111-47500.pth')),strict=False)
+model.load_state_dict(torch.load(os.path.join(args.model_dir,'pretrained_gp.pth')))
 
 # Disable resnet
 for param in model.net.resnet.parameters():
@@ -226,13 +226,13 @@ optimizer = optim.Adam([
     {'params': model.likelihood.parameters(), \
      'lr': args.learning_rate,'weight_decay':args.weight_decay},
     {'params': model.net.global_context.parameters(), \
-     'lr': args.learning_rate * 0.1,'weight_decay':args.weight_decay},
-    {'params': model.net.global_regressor.parameters(), \
      'lr': args.learning_rate * 0.01,'weight_decay':args.weight_decay},
+    {'params': model.net.global_regressor.parameters(), \
+     'lr': args.learning_rate * 0.001,'weight_decay':args.weight_decay},
 ])
 
 #scheduler = optim.lr_scheduler.LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch: args.decay_rate**epoch)
-scheduler = optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=3, gamma = args.decay_rate)
+scheduler = optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=1, gamma = args.decay_rate)
 mll = gpytorch.mlls.VariationalELBO(model.likelihood, model.gp, num_data=len(dataset.Targets))
 
 

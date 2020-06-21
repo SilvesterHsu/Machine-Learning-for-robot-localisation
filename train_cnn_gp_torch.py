@@ -233,8 +233,8 @@ optimizer = optim.Adam([
 
 #scheduler = optim.lr_scheduler.LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch: args.decay_rate**epoch)
 scheduler = optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=1, gamma = args.decay_rate)
-mll = gpytorch.mlls.VariationalELBO(model.likelihood, model.gp, num_data=len(dataset.Targets))
-
+#mll = gpytorch.mlls.VariationalELBO(model.likelihood, model.gp, num_data=len(dataset.Targets))
+mll = gpytorch.mlls.PredictiveLogLikelihood(model.likelihood, model.gp, num_data=len(dataset.Targets))
 
 # In[10]:
 
@@ -251,8 +251,6 @@ print('Likelihood parameters:', sum(param.numel() for param in model.likelihood.
 
 
 def train(e):
-    model.train()
-    model.likelihood.train()
     train_loss = 0.
     with gpytorch.settings.num_likelihood_samples(8):
         for b, data in enumerate(dataloader, 0):
@@ -294,6 +292,7 @@ def train(e):
 
 # In[11]:
 
+model.train()
 for epoch in range(args.num_epochs):
     train(epoch)
     scheduler.step()

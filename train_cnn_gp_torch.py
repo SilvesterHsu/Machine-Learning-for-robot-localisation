@@ -24,8 +24,11 @@ if torch.cuda.is_available():
 
 
 torch.set_default_dtype(torch.float32)
-torch.set_printoptions(precision=3)
+torch.set_printoptions(precision=8)
 torch.backends.cudnn.benchmark = True
+
+from torch.utils.tensorboard import SummaryWriter
+writer = SummaryWriter('runs/train_cnn_gp_torch')
 
 
 # # Set Arguments
@@ -45,13 +48,13 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--batch_size', type=int, default=300, help='minibatch size')
 parser.add_argument('--num_epochs', type=int, default=200, help='number of epochs')
 parser.add_argument('--grad_clip', type=float, default=5., help='clip gradients at this value')
-parser.add_argument('--learning_rate', type=float, default=0.002, help='learning rate')
+parser.add_argument('--learning_rate', type=float, default=0.001, help='learning rate')
 parser.add_argument('--learning_rate_clip', type=float, default=0.0000001, help='learning rate clip')
 parser.add_argument('--decay_rate', type=float, default=.9, help='decay rate for rmsprop')
 parser.add_argument('--weight_decay', type=float, default=.0001, help='decay rate for rmsprop')
 parser.add_argument('--batch_norm_decay', type=float, default=.999, help='decay rate for rmsprop')
 parser.add_argument('--keep_prob', type=float, default=1.0, help='dropout keep probability')
-parser.add_argument('--lamda_weights', type=float, default=10, help='lamda weight')
+parser.add_argument('--lamda_weights', type=float, default=0.01, help='lamda weight')
 parser.add_argument('--data_argumentation', type=bool, default=True, help='whether do data argument')
 parser.add_argument('--is_normalization', type=bool, default=True, help='whether do data nomalization')
 parser.add_argument('--target_image_size', default=[300, 300], nargs=2, type=int, help='Input images will be resized to this for data argumentation.')
@@ -74,7 +77,7 @@ parser.add_argument('--train_dataset', type=str, default = ['/notebooks/michigan
 parser.add_argument('--train_dataset', type=str, default = ['/notebooks/michigan_nn_data/test'])
 '''
 parser.add_argument('--seed', default=1337, type=int)
-parser.add_argument('--save_every', type=int, default=2500, help='save frequency')
+parser.add_argument('--save_every', type=int, default=2000, help='save frequency')
 parser.add_argument('--display', type=int, default=10, help='display frequency')
 
 sys.argv = ['']
@@ -107,8 +110,10 @@ transform = transforms.Compose([transforms.ToTensor()])
 dataset = LocalizationDataset(dataset_dirs = args.train_dataset,                               image_size = args.target_image_size,                               transform = transform,
                               get_pair = False)
 [args.norm_mean, args.norm_std] = [torch.tensor(x) for x in dataset.get_norm()]
+torch.save([args.norm_mean, args.norm_std], '/notebooks/global_localization/norm_mean_std.pt')
 
-dataloader = DataLoader(dataset, batch_size=args.batch_size,                         shuffle=True, num_workers=0,                         drop_last=True, pin_memory=True)
+
+dataloader = DataLoader(dataset, batch_size=args.batch_size,                         shuffle=True, num_workers=0,                         drop_last=True)#, pin_memory=True)
 
 
 # # Define Model
@@ -186,6 +191,8 @@ class GPModel(gpytorch.Module):
         return output,rot_pred
 
 
+# ## Creat Model
+
 # In[7]:
 
 
@@ -195,17 +202,38 @@ if torch.cuda.is_available():
     torch.cuda.set_device(device)
 
 model = GPModel(torch.zeros(3, args.batch_size, 128)).to(device)
-#model.net.load_state_dict(torch.load(os.path.join('/notebooks/global_localization/dual_resnet_torch','model-23-96000.pth')))
-model.load_state_dict(torch.load(os.path.join(args.model_dir,'pretrained_gp.pth')))
-
-# Disable resnet
-for param in model.net.resnet.parameters():
-    param.requires_grad = False
+# Load Resnet
+'''
+state_dict = torch.load('/notebooks/global_localization/dual_resnet_torch/pretrained.pth')
+for name,param in state_dict.items():
+    print(name, param.shape)
+print('Parameters layer:',len(state_dict.keys()))
+model.net.load_state_dict(state_dict)
+'''
 
 
 # In[8]:
 
 
+#state_dict = torch.load(os.path.join(args.model_dir,'pretrained_gp.pth'))
+state_dict = torch.load(os.path.join(args.model_dir,'pretrained_t3.pth'))
+for name,param in state_dict.items():
+    print(name, param.shape)
+print('Parameters layer:',len(state_dict.keys()))
+model.load_state_dict(state_dict)
+
+
+# In[9]:
+
+
+# Disable resnet
+for param in model.net.resnet.parameters():
+    param.requires_grad = False
+'''    
+for param in model.net.parameters():
+    param.requires_grad = False
+'''
+# Display Learn parameters
 for name, param in model.named_parameters():
     if param.requires_grad:
         print (name, param.shape)
@@ -214,7 +242,7 @@ for name, param in model.named_parameters():
 # # Training
 # ## Parameters
 
-# In[9]:
+# In[10]:
 
 
 args.norm_mean = args.norm_mean.to(device)
@@ -225,18 +253,25 @@ optimizer = optim.Adam([
      'lr': args.learning_rate,'weight_decay':args.weight_decay},
     {'params': model.likelihood.parameters(), \
      'lr': args.learning_rate,'weight_decay':args.weight_decay},
-    {'params': model.net.global_context.parameters(), \
-     'lr': args.learning_rate * 0.01,'weight_decay':args.weight_decay},
     {'params': model.net.global_regressor.parameters(), \
-     'lr': args.learning_rate * 0.001,'weight_decay':args.weight_decay},
+     'lr': args.learning_rate * 0.5,'weight_decay':args.weight_decay},
+    {'params': model.net.global_context.parameters(), \
+     'lr': args.learning_rate * 0.2,'weight_decay':args.weight_decay},
 ])
-
-#scheduler = optim.lr_scheduler.LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch: args.decay_rate**epoch)
-scheduler = optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=1, gamma = args.decay_rate)
+'''
+optimizer = optim.Adam([
+    {'params': model.gp.parameters(), \
+     'lr': args.learning_rate,'weight_decay':args.weight_decay},
+    {'params': model.likelihood.parameters(), \
+     'lr': args.learning_rate,'weight_decay':args.weight_decay},
+])
+'''
+scheduler = optim.lr_scheduler.LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch: args.decay_rate**epoch)
 #mll = gpytorch.mlls.VariationalELBO(model.likelihood, model.gp, num_data=len(dataset.Targets))
-mll = gpytorch.mlls.PredictiveLogLikelihood(model.likelihood, model.gp, num_data=len(dataset.Targets))
+mll = gpytorch.mlls.PredictiveLogLikelihood(model.likelihood, model.gp, num_data=len(dataset.Targets),beta=1.0)
 
-# In[10]:
+
+# In[11]:
 
 
 print('CNN model parameters:', sum(param.numel() for param in model.net.global_context.parameters()))
@@ -247,12 +282,12 @@ print('Likelihood parameters:', sum(param.numel() for param in model.likelihood.
 
 # ## Training Epoch
 
-# In[10]:
+# In[12]:
 
 
 def train(e):
     train_loss = 0.
-    with gpytorch.settings.num_likelihood_samples(8):
+    with gpytorch.settings.num_likelihood_samples(100):
         for b, data in enumerate(dataloader, 0):
             start = time.time()
             with torch.no_grad():
@@ -274,6 +309,10 @@ def train(e):
             with torch.no_grad():
                 train_loss += float(total_loss)
                 lr = scheduler.get_last_lr()[0]
+                writer.add_scalars('training loss',
+                  {'item loss':float(total_loss),
+                  'batch loss':train_loss/(b+1)},
+                  e * len(dataloader) + (b+1))
                 if ((b+1)%args.display == 0):
                      print(
                         "{}/{} (epoch {}), train_loss = {}, time/batch = {:.3f}, learning rate = {:.9f}"
@@ -290,11 +329,17 @@ def train(e):
                     print('saving model to model-{}-{}.pth'.format(e, e * len(dataloader) + (b+1)))
 
 
-# In[11]:
+# In[ ]:
 
-model.train()
-for epoch in range(args.num_epochs):
-    train(epoch)
+model.net.resnet.eval()
+model.net.global_context.train()
+model.net.global_regressor.train()
+model.gp.train()
+model.likelihood.train()
+
+for e in range(args.num_epochs):
+#for e in range(20):
+    train(e)
     scheduler.step()
 
 

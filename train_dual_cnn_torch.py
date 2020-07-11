@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # coding: utf-8
 
 # # Torch
@@ -27,6 +27,9 @@ torch.set_default_dtype(torch.float32)
 torch.set_printoptions(precision=8)
 torch.backends.cudnn.benchmark = True
 
+from torch.utils.tensorboard import SummaryWriter
+writer = SummaryWriter('runs/train_dual_cnn_torch')
+
 
 # # Set Arguments
 
@@ -47,7 +50,7 @@ parser.add_argument('--num_epochs', type=int, default=200, help='number of epoch
 parser.add_argument('--grad_clip', type=float, default=5., help='clip gradients at this value')
 parser.add_argument('--learning_rate', type=float, default=0.0001, help='learning rate')
 parser.add_argument('--learning_rate_clip', type=float, default=0.0000001, help='learning rate clip')
-parser.add_argument('--decay_rate', type=float, default=.95, help='decay rate for rmsprop')
+parser.add_argument('--decay_rate', type=float, default=.75, help='decay rate for rmsprop')
 parser.add_argument('--weight_decay', type=float, default=.0001, help='decay rate for rmsprop')
 parser.add_argument('--batch_norm_decay', type=float, default=.999, help='decay rate for rmsprop')
 parser.add_argument('--keep_prob', type=float, default=1.0, help='dropout keep probability')
@@ -71,8 +74,8 @@ parser.add_argument('--train_dataset', type=str, default = ['/notebooks/michigan
 '''
 parser.add_argument('--train_dataset', type=str, default = ['/notebooks/michigan_nn_data/test'])
 '''
-parser.add_argument('--seed', default=1338, type=int)
-parser.add_argument('--save_every', type=int, default=2000, help='save frequency')
+parser.add_argument('--seed', default=1337, type=int)
+parser.add_argument('--save_every', type=int, default=2500, help='save frequency')
 parser.add_argument('--display', type=int, default=10, help='display frequency')
 
 sys.argv = ['']
@@ -189,14 +192,11 @@ def quanternion2matrix(q):
     return M
 
 def matrix2quternion(M):
+    eps = torch.finfo(M.dtype).eps
     tx = M[:, 0, 3].unsqueeze(-1)
     ty = M[:, 1, 3].unsqueeze(-1)
     tz = M[:, 2, 3].unsqueeze(-1)
-    qw = 0.5 * torch.sqrt(M[:, 0, 0] + M[:, 1, 1] + M[:, 2, 2] + M[:, 3, 3]).unsqueeze(-1)
-
-    mask = torch.abs(qw)<10e-6
-    qw = qw if mask.sum()==mask.shape[0] else qw+10e-6
-
+    qw = 0.5 * torch.sqrt(M[:, 0, 0] + M[:, 1, 1] + M[:, 2, 2] + M[:, 3, 3] + eps).unsqueeze(-1) # sqrt ！= 0 
     qx = torch.unsqueeze(M[:, 2, 1] - M[:, 1, 2],-1) / (4. * qw)
     qy = torch.unsqueeze(M[:, 0, 2] - M[:, 2, 0],-1) / (4. * qw)
     qz = torch.unsqueeze(M[:, 1, 0] - M[:, 0, 1],-1) / (4. * qw)
@@ -234,75 +234,22 @@ def translational_rotational_loss(pred=None, gt=None, lamda=None):
 
     return loss#, trans_loss, rot_loss
 
-def _quanternion2matrix(q):
-    tx, ty, tz, qx, qy, qz, qw = torch.split(q,[1, 1, 1, 1, 1, 1, 1], dim=-1)
-    M11 = 1.0 - 2 * (torch.square(qy) + torch.square(qz))
-    M12 = 2. * qx * qy - 2. * qw * qz
-    M13 = 2. * qw * qy + 2. * qx * qz
-    M14 = tx
 
-    M21 = 2. * qx * qy + 2. * qw * qz
-    M22 = 1. - 2. * (torch.square(qx) + torch.square(qz))
-    M23 = -2. * qw * qx + 2. * qy * qz
-    M24 = ty
-
-    M31 = -2. * qw * qy + 2. * qx * qz
-    M32 = 2. * qw * qx + 2. * qy * qz
-    M33 = 1. - 2. * (torch.square(qx) + torch.square(qy))
-    M34 = tz
-
-    M41 = torch.zeros_like(M11)
-    M42 = torch.zeros_like(M11)
-    M43 = torch.zeros_like(M11)
-    M44 = torch.ones_like(M11)
-
-    #M11.unsqueeze_(-1)
-    M11.unsqueeze_(axis=-1)
-    M12.unsqueeze_(axis=-1)
-    M13.unsqueeze_(axis=-1)
-    M14.unsqueeze_(axis=-1)
-
-    M21.unsqueeze_(axis=-1)
-    M22.unsqueeze_(axis=-1)
-    M23.unsqueeze_(axis=-1)
-    M24.unsqueeze_(axis=-1)
-
-    M31.unsqueeze_(axis=-1)
-    M32.unsqueeze_(axis=-1)
-    M33.unsqueeze_(axis=-1)
-    M34.unsqueeze_(axis=-1)
-
-    M41.unsqueeze_(axis=-1)
-    M42.unsqueeze_(axis=-1)
-    M43.unsqueeze_(axis=-1)
-    M44.unsqueeze_(axis=-1)
-
-    M_l1 = torch.cat([M11, M12, M13, M14], axis=2)
-    M_l2 = torch.cat([M21, M22, M23, M24], axis=2)
-    M_l3 = torch.cat([M31, M32, M33, M34], axis=2)
-    M_l4 = torch.cat([M41, M42, M43, M44], axis=2)
-
-    M = torch.cat([M_l1, M_l2, M_l3, M_l4], axis=1)
-
-    return M
-
-def _matrix2quternion(M):
-    tx = M[:, 0, 3].unsqueeze_(-1)
-    ty = M[:, 1, 3].unsqueeze_(-1)
-    tz = M[:, 2, 3].unsqueeze_(-1)
-    qw = 0.5 * torch.sqrt(M[:, 0, 0] + M[:, 1, 1] + M[:, 2, 2] + M[:, 3, 3]).unsqueeze_(-1)
-
-    mask = torch.abs(qw)<10e-6
-    qw = qw if mask.sum()==mask.shape[0] else qw+10e-6
-
-    qx = torch.unsqueeze(M[:, 2, 1] - M[:, 1, 2],-1) / (4. * qw)
-    qy = torch.unsqueeze(M[:, 0, 2] - M[:, 2, 0],-1) / (4. * qw)
-    qz = torch.unsqueeze(M[:, 1, 0] - M[:, 0, 1],-1) / (4. * qw)
-    q = torch.cat([tx, ty, tz, qx, qy, qz, qw], dim=-1)
-    return q
-
+# ## Tensorboard Graphs
 
 # In[8]:
+
+'''
+with torch.no_grad():
+    graphs = Model()
+    x0,x1 = next(iter(dataloader))['image']
+    writer.add_graph(graphs, (x0,x1))
+del x0,x1,graphs
+'''
+
+# ## Creat Model
+
+# In[9]:
 
 
 device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
@@ -312,22 +259,30 @@ if torch.cuda.is_available():
 # set to cpu
 #device = torch.device("cpu")
 net = Model().to(device)
-net.load_state_dict(torch.load(os.path.join(args.model_dir,'model-0-2000.pth')),strict=False)
+state_dict = torch.load(os.path.join(args.model_dir,'pretrained.pth'))
+# pretrained
+for name,param in state_dict.items():
+    print(name, param.shape)
+print('Parameters layer:',len(state_dict.keys()))
+
+net.load_state_dict(state_dict)
+
 
 # ## Model Structure
 
-# In[9]:
+# In[10]:
 
 
 for name, param in net.named_parameters():
     if param.requires_grad:
-        print (name, param.shape)
+        print(name, param.shape)
+print('Parameters layer:',len(net.state_dict().keys()))
 
 
 # # Training
 # ## Parameters
 
-# In[10]:
+# In[11]:
 
 
 args.norm_mean = args.norm_mean.to(device)
@@ -335,57 +290,48 @@ args.norm_std = args.norm_std.to(device)
 
 optimizer = optim.Adam(net.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
 #optimizer = optimizers.FusedAdam(net.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-#scheduler = optim.lr_scheduler.LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch: args.decay_rate**epoch)
-scheduler = optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=1, gamma = args.decay_rate)
+scheduler = optim.lr_scheduler.LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch: args.decay_rate**epoch)
 
 #net, optimizer = amp.initialize(net, optimizer, opt_level="O1")
 
 
 # ## Training Epoch
 
-# In[11]:
+# In[12]:
 
 
-for e in range(args.num_epochs):
-#for e in range(2):
-    if e != 0:
-        scheduler.step()
+def train(e):
+    net.train()
     train_loss = 0.
     for b, data in enumerate(dataloader, 0):
-
         start = time.time()
+        with torch.no_grad():
+            x0, x1 = data['image']
+            y0, y1 = data['target']
+            x0,x1,y0,y1 = x0.to(device),x1.to(device),y0.to(device),y1.to(device)
+            # normalize targets
+            y0_norm, y1_norm = [normalize(y,args.norm_mean, args.norm_std) for y in [y0,y1]]
+            relative_target_normed = get_relative_pose(y0_norm, y1_norm)
+
         optimizer.zero_grad()
-        
-        x0, x1 = data['image']
-        y0, y1 = data['target']
-        x0,x1,y0,y1 = x0.to(device),x1.to(device),y0.to(device),y1.to(device)
-        # normalize targets
-        y0_norm, y1_norm = [normalize(y,args.norm_mean, args.norm_std) for y in [y0,y1]]
-        relative_target_normed = get_relative_pose(y0_norm, y1_norm)
-        
         # Part 1: Net Forward
         global_output0,global_output1 = net(x0, x1)
-
         # Part 2: Loss
-        
         relative_consistence = get_relative_pose(global_output0,global_output1)
-
         global_loss = translational_rotational_loss(pred=global_output1,                                                     gt=y1_norm,                                                     lamda=args.lamda_weights)
         geometry_consistent_loss = translational_rotational_loss(pred=relative_consistence,                                                                  gt=relative_target_normed,                                                                  lamda=args.lamda_weights)
-        total_loss = global_loss + geometry_consistent_loss
-        
-        # Part 3: Net Backward
-        #with amp.scale_loss(total_loss, optimizer) as scaled_loss:
-        #    scaled_loss.backward()
-        
+        total_loss = global_loss + geometry_consistent_loss        
         total_loss.backward()
         optimizer.step()
 
-        #del global_output0,global_output1,relative_consistence,global_loss,geometry_consistent_loss
         end = time.time()
-
         with torch.no_grad():
             train_loss += float(total_loss)
+            lr = scheduler.get_last_lr()[0]
+            writer.add_scalars('training loss',
+                  {'item loss':float(total_loss),
+                  'batch loss':train_loss/(b+1)},
+                  e * len(dataloader) + (b+1))
             if ((b+1)%args.display == 0):
                  print(
                     "{}/{} (epoch {}), train_loss = {}, time/batch = {:.3f}, learning rate = {:.9f}"
@@ -395,11 +341,19 @@ for e in range(args.num_epochs):
                     e,
                     train_loss/(b+1),
                     end - start,
-                    optimizer.param_groups[0]['lr']))
+                    lr))            
             if (e * len(dataloader) + (b+1)) % args.save_every == 0:
                 checkpoint_path = os.path.join(args.model_dir, 'model-{}-{}.pth'.format(e, e * len(dataloader) + (b+1)))
                 torch.save(net.state_dict(),checkpoint_path)
                 print('saving model to model-{}-{}.pth'.format(e, e * len(dataloader) + (b+1)))
+
+
+# In[ ]:
+
+
+for e in range(args.num_epochs):
+    train(e)
+    scheduler.step()
 
 
 # In[ ]:

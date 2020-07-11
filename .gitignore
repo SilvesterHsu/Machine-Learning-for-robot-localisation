@@ -1,3 +1,5 @@
 .idea
 .ipynb_checkpoints
 frozen_inception_v1_2015_12_05.tar.gz
+runs
+mnist_train

@@ -142,7 +142,10 @@ class LocalizationDataset(Dataset):
         return img, target
     
     def __len__(self):
-        return len(self.Targets) - self.num_connected_frames
+        if self.get_pair:
+            return len(self.Targets) - self.num_connected_frames
+        else:
+            return len(self.Targets)
     '''
     def __getitem_single__(self, idx): # next
         if torch.is_tensor(idx):
@@ -168,7 +171,8 @@ class LocalizationDataset(Dataset):
     def __getitem__(self, idx): # next_pair
         if torch.is_tensor(idx):
             idx = idx.tolist()
-        idx +=  self.num_connected_frames
+        if self.get_pair:
+            idx +=  self.num_connected_frames
         
         image_1 = self.Images[idx]
         target_1 = self.Targets[idx]
@@ -215,3 +219,14 @@ class LocalizationDataset(Dataset):
         norm_mean = np.mean(pos, axis=0)
         norm_std = np.std(pos - norm_mean,axis=0)
         return norm_mean,norm_std
+    
+def display_loss(present_step,total_step,epoch,train_loss,batch_time,lr):
+    print(
+        "{}/{} (epoch {}), train_loss = {:.8f}, time/batch = {:.3f}, learning rate = {:.8f}"
+        .format(present_step,total_step,epoch,train_loss,batch_time,lr))
+    
+def data2tensorboard(writer,item_loss,batch_loss,present_step):
+    writer.add_scalars('training loss',
+                  {'item loss':item_loss,
+                  'batch loss':batch_loss},
+                  present_step)

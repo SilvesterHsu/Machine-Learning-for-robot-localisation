@@ -84,7 +84,7 @@ class Regressor(nn.Module):
         net_r = self.fc1_rot(x)
         net_r = self.fc2_rot(net_r)
         feature_r = self.fc3_rot(net_r)
-        
+        # Part 3: FC layer
         logits_t = self.logits_t(feature_t)
         logits_r = self.logits_r(feature_r)
         

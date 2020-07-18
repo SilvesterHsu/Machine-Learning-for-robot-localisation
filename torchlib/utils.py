@@ -14,6 +14,24 @@ import imutils
 import torch
 from torch.utils.data import Dataset
 
+def list_device():
+    if torch.cuda.is_available():
+        print('------------ List Devices ------------')
+        for i in range(torch.cuda.device_count()):
+            print('Device',i,':')
+            print(torch.cuda.get_device_name(i))
+            print('Memory Usage:')
+            print('Allocated:', round(torch.cuda.memory_allocated(i)/1024**3,1), 'GB')
+            print('Cached:   ', round(torch.cuda.memory_cached(i)/1024**3,1), 'GB\n')
+            
+def set_device(i):
+    device = torch.device("cuda:"+str(i) if torch.cuda.is_available() else "cpu")
+    #device = torch.device("cpu")
+    if torch.cuda.is_available():
+        torch.cuda.set_device(device)
+        i = torch.cuda.current_device()
+        print('Using Device',i,':',torch.cuda.get_device_name(i))
+
 class LocalizationDataset(Dataset):
     """class:`LocalizationDataset`
 
@@ -146,28 +164,7 @@ class LocalizationDataset(Dataset):
             return len(self.Targets) - self.num_connected_frames
         else:
             return len(self.Targets)
-    '''
-    def __getitem_single__(self, idx): # next
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-        idx +=  self.num_connected_frames
-            
-        image = self.Images[idx]
-        target = self.Targets[idx]
-        # move to `__loaddata()` 
-        #image,target = self._image_argumentation(image,target,self.image_size)
-        
-        if self.normalize:
-            target = self._normalize(target)
-        
-        #np.testing.assert_approx_equal(np.sum(target[-4:] ** 2), 1.0, significant=5)
-        
-        if self.transform:
-            image = self.transform(image)
-        sample = {'image': image, 'target': target}
-        
-        return sample
-    '''
+
     def __getitem__(self, idx): # next_pair
         if torch.is_tensor(idx):
             idx = idx.tolist()
@@ -219,6 +216,12 @@ class LocalizationDataset(Dataset):
         norm_mean = np.mean(pos, axis=0)
         norm_std = np.std(pos - norm_mean,axis=0)
         return norm_mean,norm_std
+    
+def normalize(target, norm_mean, norm_std):
+    target_trans = target[:,:3]
+    target_trans = torch.div(torch.sub(target_trans,norm_mean),norm_std)
+    target_normed = torch.cat([target_trans,target[:,3:]],dim=1)
+    return target_normed 
     
 def display_loss(present_step,total_step,epoch,train_loss,batch_time,lr):
     print(

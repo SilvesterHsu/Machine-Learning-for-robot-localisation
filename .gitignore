@@ -5,3 +5,6 @@ runs
 mnist_train
 __pycache__
 torchlib/__pycache__/*.pyc
+*.png
+
+*.mat

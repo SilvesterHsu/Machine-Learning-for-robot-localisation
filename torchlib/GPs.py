@@ -140,7 +140,7 @@ class BaseModule:
                 print (name, param.shape)
                 
     def schedule_step(self,step,step_every = 150):
-        if self.scheduler.get_last_lr()[-1] > self.args.learning_rate_clip and step % step_every == 0:
+        if self.scheduler.get_last_lr()[0] > self.args.learning_rate_clip and step % step_every == 0:
             self.scheduler.step()
             
     def save_model_step(self,e,step):

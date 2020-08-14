@@ -55,7 +55,7 @@ class LocalizationDataset(Dataset):
         TypeError: `sampling_rate` and `frames` should be integer.
     """
     def __init__(self, dataset_dirs, image_size=[300,300], frames=10, sampling_rate=2, \
-                 transform=None, normalize=False, get_pair = True, mode = 'train'):
+                 transform=None, normalize=False, get_pair = True, mode = 'train', seed = 0):
         self.dataset_dirs = dataset_dirs
         self.image_size = image_size
         self.num_connected_frames = frames
@@ -66,7 +66,8 @@ class LocalizationDataset(Dataset):
         
         self.Images = list()
         self.Targets = list()
-        
+        self.last_indexes = list()
+        np.random.seed(seed)
         self.__loaddata(mode)
         self.norm_mean,self.norm_std = self.get_norm()
         
@@ -89,9 +90,13 @@ class LocalizationDataset(Dataset):
                 #np.testing.assert_approx_equal(np.sum(target[-4:] ** 2), 1.0, significant=5)
                 
                 img,target = self._image_argumentation(img,target,self.image_size,mode=mode)
+                #img = self.transform(img)
                 
                 self.Images.append(img)
                 self.Targets.append(target)
+        
+            last_index = len(self.Targets) - 1
+            self.last_indexes.append(last_index)
     
     def _normalize(self, target):
         target_trans = target[:3]
@@ -170,6 +175,10 @@ class LocalizationDataset(Dataset):
             idx = idx.tolist()
         if self.get_pair:
             idx +=  self.num_connected_frames
+            for last_index in self.last_indexes:
+                if last_index< idx < last_index+1+self.num_connected_frames:
+                    idx = last_index+1+self.num_connected_frames
+                    break
         
         image_1 = self.Images[idx]
         target_1 = self.Targets[idx]
@@ -178,6 +187,7 @@ class LocalizationDataset(Dataset):
             paired_frame_offset = random.randint(1, self.num_connected_frames)
             image_0 = self.Images[idx-paired_frame_offset]
             target_0 = self.Targets[idx-paired_frame_offset]
+            
         
         
         # move to `__loaddata()` 
@@ -193,11 +203,12 @@ class LocalizationDataset(Dataset):
         #np.testing.assert_approx_equal(np.sum(target_0[-4:] ** 2), 1.0, significant=5)
         #np.testing.assert_approx_equal(np.sum(target_1[-4:] ** 2), 1.0, significant=5)
         
+        
         if self.transform:
             image_1 = self.transform(image_1)
             if self.get_pair:
                 image_0 = self.transform(image_0)
-            
+        
         if self.get_pair:  
             sample = {'image': [image_0, image_1], 'target': [target_0, target_1]}
         else:

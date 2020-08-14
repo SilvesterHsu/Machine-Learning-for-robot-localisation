@@ -50,14 +50,15 @@ class GP(gpytorch.models.ApproximateGP):
         return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
 
 class GPNode(nn.Module):
-    def __init__(self, inducing_points, seed, feat_dim = 128):
+    def __init__(self, inducing_points, seed=0, feat_dim = 128, sub_feat = True):
         super().__init__()
         output_dim = inducing_points.shape[0]
-        sub_feat_dim = inducing_points.shape[-1]
-        torch.manual_seed(seed)
         
-        self.feat_index = torch.randperm(feat_dim)[:sub_feat_dim]
-        self.gp = GP(inducing_points)
+        if sub_feat:
+            sub_feat_dim = inducing_points.shape[-1]
+            torch.manual_seed(seed)
+            self.feat_index = torch.randperm(feat_dim)[:sub_feat_dim]
+        self.gp = GP(inducing_points,output_dim)
         self.likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks=output_dim) 
         
     def forward(self,input_data):
@@ -110,14 +111,8 @@ class BaseModule:
         state_dict = torch.load(os.path.join(self.args.model_dir, file_name))
         if 'net.resnet.conv1.weight' in state_dict:
             print('Transform from old model.')
-            # Part 1: backbone
-            backbone_state_dict = self._from_old_model(state_dict,'backbone')
-            print('Backbone parameters layer:',len(backbone_state_dict.keys()))
-            self.model.backbone.load_state_dict(backbone_state_dict,strict = True)
-            # Part 2: nn
-            nn_state_dict = self._from_old_model(torch.load(os.path.join(model_dir, file_name)),'nn')
-            print('NN parameters layer:',len(nn_state_dict.keys()))
-            self.model.nn.load_state_dict(nn_state_dict,strict = strict)
+            state_dict = self._from_old_model(state_dict)
+            self.model.load_state_dict(state_dict,strict = strict)
         else:
             #print('Parameters layer:',len(state_dict.keys()))
             # load file to model

@@ -99,11 +99,14 @@ def normalize(target, norm_mean, norm_std):
     target_normed = torch.cat([target_trans,target[:,3:]],dim=1)
     return target_normed 
 
-def translational_rotational_loss(pred=None, gt=None, lamda=None):
+def translational_rotational_loss(pred=None, gt=None, lamda=None, loss_type='mse'):
     trans_pred, rot_pred = torch.split(pred, [3,4], dim=1)
     trans_gt, rot_gt = torch.split(gt, [3, 4], dim=1)
     
-    trans_loss = nn.functional.mse_loss(input=trans_pred, target=trans_gt)
+    if loss_type=='mse':
+        trans_loss = nn.functional.mse_loss(input=trans_pred, target=trans_gt)
+    else:
+        trans_loss = torch.sum((trans_pred - trans_gt)**2,dim=1).mean()
     rot_loss = 1. - torch.mean(torch.square(torch.sum(torch.mul(rot_pred,rot_gt),dim=1)))
     
     loss = trans_loss + lamda * rot_loss
